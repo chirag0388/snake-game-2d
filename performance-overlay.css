@@ -1,0 +1,21 @@
+.performance-overlay {
+    position: absolute;
+    bottom: 20px;
+    right: 20px;
+    background: rgba(0, 0, 0, 0.7);
+    padding: 10px 15px;
+    border-radius: 10px;
+    font-size: 0.85rem;
+    font-family: 'Courier New', monospace;
+    color: #00ff00;
+    border: 1px solid rgba(0, 255, 0, 0.3);
+}
+
+.performance-overlay div {
+    margin: 3px 0;
+}
+
+.performance-overlay span {
+    color: #ffff00;
+    font-weight: bold;
+}

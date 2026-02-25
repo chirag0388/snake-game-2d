@@ -1,0 +1,465 @@
+:root {
+    --primary-color: #ff4757;
+    --secondary-color: #2ed573;
+    --accent-color: #ffa502;
+    --dark-bg: #2f3542;
+    --glass-bg: rgba(255, 255, 255, 0.1);
+    --glass-border: rgba(255, 255, 255, 0.2);
+    --text-color: #ffffff;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+body {
+    font-family: 'Nunito', sans-serif;
+    overflow: hidden;
+    background-color: #1e1e1e;
+    color: var(--text-color);
+}
+
+#game-container {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+}
+
+canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    background-color: #222;
+    /* Fallback */
+}
+
+/* UI Overlays */
+.ui-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(5px);
+    z-index: 10;
+    transition: opacity 0.3s ease;
+}
+
+.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* Logo & Tagline */
+.logo-area {
+    text-align: center;
+    margin-bottom: 2rem;
+    animation: float 3s ease-in-out infinite;
+}
+
+h1 {
+    font-family: 'Fredoka One', cursive;
+    font-size: 5rem;
+    background: linear-gradient(45deg, #ff6b6b, #feca57, #48dbfb, #ff9ff3);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    text-shadow: 2px 2px 10px rgba(0, 0, 0, 0.3);
+    letter-spacing: 2px;
+}
+
+.tagline {
+    font-size: 1.2rem;
+    color: #ced6e0;
+    margin-top: -10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+/* Input & Buttons */
+.input-group {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    align-items: center;
+    width: 100%;
+    max-width: 300px;
+}
+
+input {
+    width: 100%;
+    padding: 15px;
+    border-radius: 30px;
+    border: 2px solid var(--glass-border);
+    background: rgba(255, 255, 255, 0.9);
+    font-size: 1.2rem;
+    text-align: center;
+    font-family: 'Nunito', sans-serif;
+    font-weight: 700;
+    outline: none;
+    transition: transform 0.2s;
+}
+
+input:focus {
+    transform: scale(1.05);
+    border-color: var(--primary-color);
+}
+
+button {
+    width: 100%;
+    padding: 15px;
+    border-radius: 30px;
+    border: none;
+    background: linear-gradient(45deg, var(--primary-color), var(--accent-color));
+    color: white;
+    font-size: 1.5rem;
+    font-family: 'Fredoka One', cursive;
+    cursor: pointer;
+    box-shadow: 0 5px 15px rgba(255, 71, 87, 0.4);
+    transition: transform 0.1s, box-shadow 0.1s;
+}
+
+button:active {
+    transform: scale(0.95);
+    box-shadow: 0 2px 5px rgba(255, 71, 87, 0.4);
+}
+
+/* Controls Hint */
+.controls-hint {
+    margin-top: 2rem;
+    text-align: center;
+    color: #a4b0be;
+    font-size: 0.9rem;
+}
+
+/* HUD */
+#hud {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    padding: 20px;
+}
+
+.score-board {
+    position: absolute;
+    bottom: 20px;
+    left: 20px;
+    background: rgba(0, 0, 0, 0.5);
+    padding: 10px 20px;
+    border-radius: 20px;
+    color: white;
+    font-weight: 700;
+    font-size: 1.2rem;
+}
+
+.leaderboard {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    background: rgba(0, 0, 0, 0.5);
+    padding: 15px;
+    border-radius: 15px;
+    width: 200px;
+}
+
+.leaderboard h3 {
+    text-align: center;
+    margin-bottom: 10px;
+    color: var(--accent-color);
+    font-family: 'Fredoka One', cursive;
+}
+
+#leaderboard-list {
+    list-style: none;
+}
+
+#leaderboard-list li {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 5px;
+    font-size: 0.9rem;
+}
+
+/* Animations */
+@keyframes float {
+
+    0%,
+    100% {
+        transform: translateY(0);
+    }
+
+    50% {
+        transform: translateY(-10px);
+    }
+}
+
+/* Game Over Specifics */
+#game-over-screen h2 {
+    font-family: 'Fredoka One', cursive;
+    font-size: 4rem;
+    color: var(--primary-color);
+    margin-bottom: 1rem;
+}
+
+#final-score {
+    font-size: 1.5rem;
+    margin-bottom: 2rem;
+}
+
+/* Performance Overlay */
+.performance-overlay {
+    position: absolute;
+    bottom: 70px;
+    left: 20px;
+    background: rgba(0, 0, 0, 0.7);
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    font-family: 'Courier New', monospace;
+    color: #00ff00;
+    border: 1px solid rgba(0, 255, 0, 0.3);
+}
+
+.performance-overlay div {
+    margin: 2px 0;
+}
+
+.performance-overlay span {
+    color: #ffff00;
+    font-weight: bold;
+}
+
+
+}
+
+#game-container {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+}
+
+canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    background-color: #222;
+    /* Fallback */
+}
+
+/* UI Overlays */
+.ui-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(5px);
+    z-index: 10;
+    transition: opacity 0.3s ease;
+}
+
+.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* Logo & Tagline */
+.logo-area {
+    text-align: center;
+    margin-bottom: 2rem;
+    animation: float 3s ease-in-out infinite;
+}
+
+h1 {
+    font-family: 'Fredoka One', cursive;
+    font-size: 5rem;
+    background: linear-gradient(45deg, #ff6b6b, #feca57, #48dbfb, #ff9ff3);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    text-shadow: 2px 2px 10px rgba(0, 0, 0, 0.3);
+    letter-spacing: 2px;
+}
+
+.tagline {
+    font-size: 1.2rem;
+    color: #ced6e0;
+    margin-top: -10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+/* Input & Buttons */
+.input-group {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    align-items: center;
+    width: 100%;
+    max-width: 300px;
+}
+
+input {
+    width: 100%;
+    padding: 15px;
+    border-radius: 30px;
+    border: 2px solid var(--glass-border);
+    background: rgba(255, 255, 255, 0.9);
+    font-size: 1.2rem;
+    text-align: center;
+    font-family: 'Nunito', sans-serif;
+    font-weight: 700;
+    outline: none;
+    transition: transform 0.2s;
+}
+
+input:focus {
+    transform: scale(1.05);
+    border-color: var(--primary-color);
+}
+
+button {
+    width: 100%;
+    padding: 15px;
+    border-radius: 30px;
+    border: none;
+    background: linear-gradient(45deg, var(--primary-color), var(--accent-color));
+    color: white;
+    font-size: 1.5rem;
+    font-family: 'Fredoka One', cursive;
+    cursor: pointer;
+    box-shadow: 0 5px 15px rgba(255, 71, 87, 0.4);
+    transition: transform 0.1s, box-shadow 0.1s;
+}
+
+button:active {
+    transform: scale(0.95);
+    box-shadow: 0 2px 5px rgba(255, 71, 87, 0.4);
+}
+
+/* Controls Hint */
+.controls-hint {
+    margin-top: 2rem;
+    text-align: center;
+    color: #a4b0be;
+    font-size: 0.9rem;
+}
+
+/* HUD */
+#hud {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    padding: 20px;
+}
+
+.score-board {
+    position: absolute;
+    bottom: 20px;
+    left: 20px;
+    background: rgba(0, 0, 0, 0.5);
+    padding: 10px 20px;
+    border-radius: 20px;
+    color: white;
+    font-weight: 700;
+    font-size: 1.2rem;
+}
+
+.leaderboard {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    background: rgba(0, 0, 0, 0.5);
+    padding: 15px;
+    border-radius: 15px;
+    width: 200px;
+}
+
+.leaderboard h3 {
+    text-align: center;
+    margin-bottom: 10px;
+    color: var(--accent-color);
+    font-family: 'Fredoka One', cursive;
+}
+
+#leaderboard-list {
+    list-style: none;
+}
+
+#leaderboard-list li {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 5px;
+    font-size: 0.9rem;
+}
+
+/* Animations */
+@keyframes float {
+
+    0%,
+    100% {
+        transform: translateY(0);
+    }
+
+    50% {
+        transform: translateY(-10px);
+    }
+}
+
+/* Game Over Specifics */
+#game-over-screen h2 {
+    font-family: 'Fredoka One', cursive;
+    font-size: 4rem;
+    color: var(--primary-color);
+    margin-bottom: 1rem;
+}
+
+#final-score {
+    font-size: 1.5rem;
+    margin-bottom: 2rem;
+}
+
+/* Performance Overlay */
+.performance-overlay {
+    position: absolute;
+    bottom: 70px;
+    left: 20px;
+    background: rgba(0, 0, 0, 0.7);
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    font-family: 'Courier New', monospace;
+    color: #00ff00;
+    border: 1px solid rgba(0, 255, 0, 0.3);
+}
+
+.performance-overlay div {
+    margin: 2px 0;
+}
+
+.performance-overlay span {
+    color: #ffff00;
+    font-weight: bold;
+}

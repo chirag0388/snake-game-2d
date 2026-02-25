@@ -1,0 +1,382 @@
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d', { alpha: false });
+
+// Game State
+let player, bots = [], foods = [], powerups = [], particles = [];
+let gameRunning = false, lastTime = 0;
+let camera = { x: 0, y: 0 }, playerName = 'Player';
+const gameMapSize = 50000; // ULTRA MASSIVE
+
+// Performance
+let fpsFrames = [], lastFpsUpdate = 0, lastInputTime = performance.now(), inputDelay = 0;
+
+// Input
+let mouse = { x: 0, y: 0 }, mouseDown = false, touchId = null;
+
+// Spatial Hash
+class SpatialHash {
+    constructor(cellSize) { this.cellSize = cellSize; this.grid = new Map(); }
+    insert(obj) {
+        let k = `${Math.floor(obj.pos.x / this.cellSize)},${Math.floor(obj.pos.y / this.cellSize)}`;
+        if (!this.grid.has(k)) this.grid.set(k, []);
+        this.grid.get(k).push(obj);
+    }
+    retrieve(rect) {
+        let found = [], sx = Math.floor(rect.x / this.cellSize), sy = Math.floor(rect.y / this.cellSize),
+            ex = Math.floor((rect.x + rect.w) / this.cellSize), ey = Math.floor((rect.y + rect.h) / this.cellSize);
+        for (let x = sx; x <= ex; x++) for (let y = sy; y <= ey; y++) {
+            let k = `${x},${y}`;
+            if (this.grid.has(k)) found.push(...this.grid.get(k));
+        }
+        return found;
+    }
+    clear() { this.grid.clear(); }
+}
+const spatialHash = new SpatialHash(500);
+
+// Config
+const CONFIG = {
+    baseSpeed: 400, boostSpeed: 800, turnSpeed: 7.5,
+    botCount: 100, foodCount: 3000, maxPathPoints: 250, // Reduced bots for performance
+    colors: ['#FF3366', '#33FF99', '#33CCFF', '#FF9933', '#CC33FF', '#99FF33', '#3366FF', '#FF3333', '#CC00FF', '#00FF66', '#FF0099', '#66FF00', '#00CCFF', '#FFCC00', '#FFFFFF'],
+    fruitEmojis: ['🍰', '🍩', '🍪', '🍬', '🍭', '🍫', '🧁', '🍦', '🍧', '🍮', '🥞', '🥨', '🥐', '🥯', '🧀', '🍉', '🍓', '🍒'],
+    patterns: ['solid', 'rainbow', 'stripes']
+};
+
+class Vector {
+    constructor(x, y) { this.x = x; this.y = y; }
+    add(v) { return new Vector(this.x + v.x, this.y + v.y); }
+    sub(v) { return new Vector(this.x - v.x, this.y - v.y); }
+    mult(n) { return new Vector(this.x * n, this.y * n); }
+    mag() { return Math.sqrt(this.x * this.x + this.y * this.y); }
+    norm() { let m = this.mag(); return m === 0 ? new Vector(0, 0) : new Vector(this.x / m, this.y / m); }
+    dist(v) { return Math.sqrt((this.x - v.x) ** 2 + (this.y - v.y) ** 2); }
+    copy() { return new Vector(this.x, this.y); }
+}
+
+class Food {
+    constructor(x, y, value = 1) {
+        this.pos = new Vector(x || (Math.random() * gameMapSize * 2 - gameMapSize), y || (Math.random() * gameMapSize * 2 - gameMapSize));
+        if (this.pos.mag() > gameMapSize) this.pos = this.pos.norm().mult(gameMapSize - 50);
+        this.value = value; this.radius = 12 + (value * 2);
+        this.emoji = CONFIG.fruitEmojis[Math.floor(Math.random() * CONFIG.fruitEmojis.length)];
+        this.rotation = Math.random() * Math.PI * 2; this.floatOffset = Math.random() * 100;
+    }
+    draw(ctx) {
+        if (!isInViewport(this.pos, this.radius)) return;
+        ctx.save(); ctx.translate(this.pos.x, this.pos.y);
+        ctx.translate(0, Math.sin((Date.now() / 500) + this.floatOffset) * 3);
+        ctx.rotate(this.rotation);
+        ctx.font = `${this.radius * 2}px Arial`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.shadowColor = 'rgba(0,0,0,0.3)'; ctx.shadowBlur = 10;
+        ctx.fillText(this.emoji, 0, 0); ctx.restore();
+    }
+}
+
+class PowerUp {
+    constructor(x, y) {
+        this.pos = new Vector(x || (Math.random() * gameMapSize * 2 - gameMapSize), y || (Math.random() * gameMapSize * 2 - gameMapSize));
+        if (this.pos.mag() > gameMapSize) this.pos = this.pos.norm().mult(gameMapSize - 50);
+        let r = Math.random(); this.multiplier = r < 0.6 ? 2 : (r < 0.9 ? 5 : 10); this.radius = 35;
+    }
+    draw(ctx) {
+        if (!isInViewport(this.pos, this.radius)) return;
+        ctx.save(); ctx.translate(this.pos.x, this.pos.y);
+        ctx.scale(1 + Math.sin(Date.now() / 200) * 0.1, 1 + Math.sin(Date.now() / 200) * 0.1);
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = this.multiplier === 2 ? '#f1c40f' : (this.multiplier === 5 ? '#e67e22' : '#e74c3c');
+        ctx.fillStyle = this.multiplier === 2 ? '#f1c40f' : (this.multiplier === 5 ? '#e67e22' : '#e74c3c');
+        ctx.beginPath(); ctx.arc(0, 0, this.radius, 0, Math.PI * 2); ctx.fill();
+        ctx.lineWidth = 4; ctx.strokeStyle = 'white'; ctx.stroke();
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = 'white'; ctx.font = 'bold 28px Fredoka One';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(`x${this.multiplier}`, 0, 0); ctx.restore();
+    }
+}
+
+class Snake {
+    constructor(name, isBot = false, startScore = 100) {
+        this.name = name; this.isBot = isBot;
+        this.pos = new Vector(Math.random() * gameMapSize * 1.8 - gameMapSize * 0.9, Math.random() * gameMapSize * 1.8 - gameMapSize * 0.9);
+        this.angle = Math.random() * Math.PI * 2; this.targetAngle = this.angle;
+        this.score = startScore; this.width = this.calculateWidth(); this.targetWidth = this.width;
+        this.path = [];
+        let startLen = this.calculateTargetLength(), dir = new Vector(Math.cos(this.angle), Math.sin(this.angle)).mult(-1);
+        for (let i = 0; i < startLen; i += this.width / 2) this.path.push(this.pos.add(dir.mult(i)));
+        this.color = CONFIG.colors[Math.floor(Math.random() * CONFIG.colors.length)];
+        this.color2 = CONFIG.colors[Math.floor(Math.random() * CONFIG.colors.length)];
+        this.pattern = CONFIG.patterns[Math.floor(Math.random() * CONFIG.patterns.length)];
+        this.dead = false; this.multiplier = 1; this.multiplierTimer = 0;
+    }
+
+    calculateWidth() { return Math.min(500, 10 + Math.log10(Math.max(10, this.score)) * 20); } // 1M = 500px width
+    calculateTargetLength() { return Math.min(10000, 150 + this.score * 0.08); }
+    getPathSpacing() { return Math.max(this.width / 2, this.width * 1.2); }
+
+    update(dt) {
+        if (this.dead) return;
+        if (this.multiplier > 1) { this.multiplierTimer -= dt; if (this.multiplierTimer <= 0) this.multiplier = 1; }
+
+        let diff = this.targetAngle - this.angle;
+        while (diff <= -Math.PI) diff += Math.PI * 2;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        let turnAmount = CONFIG.turnSpeed * (25 / this.width) * dt;
+        this.angle += Math.abs(diff) < turnAmount ? (this.targetAngle - this.angle) : Math.sign(diff) * turnAmount;
+
+        let currentSpeed = (this.isBot && this.width > 50) ? CONFIG.baseSpeed * 0.9 : CONFIG.baseSpeed;
+        let boosting = (!this.isBot && mouseDown) || (this.isBot && this.wantBoost);
+        if (boosting && this.score > 20) {
+            currentSpeed = CONFIG.boostSpeed; this.score -= dt * 20;
+            if (Math.random() < 0.3) foods.push(new Food(this.path[this.path.length - 1].x, this.path[this.path.length - 1].y, 0.5));
+        }
+
+        this.pos = this.pos.add(new Vector(Math.cos(this.angle), Math.sin(this.angle)).mult(currentSpeed * dt));
+        if (this.pos.mag() > gameMapSize) { this.dead = true; spawnParticles(this.pos, 50, this.color); dropFood(this); }
+
+        let spacing = this.getPathSpacing();
+        if (this.pos.dist(this.path[0]) > spacing) {
+            this.path.unshift(this.pos.copy());
+            if (this.path.length > CONFIG.maxPathPoints) this.path.length = CONFIG.maxPathPoints;
+        }
+
+        let targetLen = this.calculateTargetLength();
+        while (this.path.length > 10 && this.path.length * this.width > targetLen) this.path.pop();
+
+        ctx.shadowBlur = 0;
+    }
+}
+if (this.dead) return;
+let lookAheadDist = this.width * 3 + 150, collisionImminent = false;
+for (let a of [0, 0.7, -0.7]) {
+    let checkPos = this.pos.add(new Vector(Math.cos(this.angle + a), Math.sin(this.angle + a)).mult(lookAheadDist));
+    if (checkPos.mag() > gameMapSize - 100) {
+        collisionImminent = true;
+        let centerDir = new Vector(0, 0).sub(this.pos);
+        this.targetAngle = Math.atan2(centerDir.y, centerDir.x);
+        break;
+    }
+    let nearby = spatialHash.retrieve({ x: Math.min(this.pos.x, checkPos.x) - 100, y: Math.min(this.pos.y, checkPos.y) - 100, w: Math.abs(this.pos.x - checkPos.x) + 200, h: Math.abs(this.pos.y - checkPos.y) + 200 });
+    for (let other of nearby) {
+        if (other === this || other.dead) continue;
+        for (let i = 0; i < other.path.length; i += Math.max(3, Math.floor(other.path.length / 8))) {
+            if (checkPos.dist(other.path[i]) < other.width / 2 + this.width + 25) {
+                collisionImminent = true;
+                this.targetAngle = a === 0 ? this.angle + (Math.random() < 0.5 ? 1 : -1) * (Math.PI / 2) : this.angle - Math.sign(a) * 1.8;
+                break;
+            }
+        }
+        if (collisionImminent) break;
+    }
+    if (collisionImminent) break;
+}
+if (!collisionImminent) {
+    this.changeDirTimer -= dt;
+    if (this.changeDirTimer <= 0) { this.targetAngle += (Math.random() - 0.5) * Math.PI * 0.8; this.changeDirTimer = Math.random() * 1.5 + 0.5; }
+}
+if (this.boostCooldown > 0) this.boostCooldown -= dt;
+if (this.boostCooldown <= 0) {
+    this.wantBoost = collisionImminent || Math.random() < 0.15;
+    this.boostCooldown = this.wantBoost ? 0.8 : 0.3;
+}
+super.update(dt);
+    }
+}
+
+function init() {
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', setupListeners);
+    else setupListeners();
+}
+
+function setupListeners() {
+    resize(); window.addEventListener('resize', resize);
+    window.addEventListener('mousemove', e => { let now = performance.now(); inputDelay = now - lastInputTime; lastInputTime = now; mouse.x = e.clientX; mouse.y = e.clientY; });
+    window.addEventListener('mousedown', () => mouseDown = true);
+    window.addEventListener('mouseup', () => mouseDown = false);
+    const c = document.getElementById('gameCanvas');
+    if (c) {
+        c.addEventListener('touchstart', e => { e.preventDefault(); let now = performance.now(); inputDelay = now - lastInputTime; lastInputTime = now; touchId = e.changedTouches[0].identifier; mouseDown = true; updateTouch(e.changedTouches[0]); }, { passive: false });
+        c.addEventListener('touchmove', e => { e.preventDefault(); let now = performance.now(); inputDelay = now - lastInputTime; lastInputTime = now; for (let i = 0; i < e.changedTouches.length; i++) if (e.changedTouches[i].identifier === touchId) updateTouch(e.changedTouches[i]); }, { passive: false });
+        c.addEventListener('touchend', e => { e.preventDefault(); mouseDown = false; });
+    }
+    const playBtn = document.getElementById('playBtn'), restartBtn = document.getElementById('restartBtn'), nameInput = document.getElementById('playerName');
+    if (playBtn) { playBtn.onclick = startGame; playBtn.addEventListener('click', startGame); }
+    if (restartBtn) restartBtn.onclick = resetGame;
+    if (nameInput) nameInput.onkeypress = e => { if (e.key === 'Enter') startGame(); };
+}
+
+function updateTouch(touch) { mouse.x = touch.clientX; mouse.y = touch.clientY; }
+function resize() { if (canvas) { canvas.width = window.innerWidth; canvas.height = window.innerHeight; } }
+
+function startGame() {
+    playerName = document.getElementById('playerName').value.trim() || "Player";
+    document.getElementById('start-screen').classList.add('hidden');
+    document.getElementById('game-over-screen').classList.add('hidden');
+    document.getElementById('hud').classList.remove('hidden');
+    resetGameLogic(); gameRunning = true; lastTime = performance.now(); requestAnimationFrame(gameLoop);
+}
+
+function resetGame() {
+    document.getElementById('game-over-screen').classList.add('hidden');
+    resetGameLogic(); gameRunning = true; lastTime = performance.now(); requestAnimationFrame(gameLoop);
+}
+
+function resetGameLogic() {
+    player = new Snake(playerName, false, 100); // START AT 100
+    bots = []; foods = []; powerups = []; particles = [];
+    for (let i = 0; i < CONFIG.botCount; i++) bots.push(new Bot());
+    for (let i = 0; i < CONFIG.foodCount; i++) foods.push(new Food());
+}
+
+function gameLoop(timestamp) {
+    if (!gameRunning) return;
+    let dt = (timestamp - lastTime) / 1000; lastTime = timestamp;
+    if (dt > 0.05) dt = 0.05;
+    update(dt); draw(); requestAnimationFrame(gameLoop);
+}
+
+function update(dt) {
+    spatialHash.clear(); spatialHash.insert(player);
+    bots.forEach(b => { if (!b.dead) spatialHash.insert(b); });
+
+    let dx = mouse.x - canvas.width / 2, dy = mouse.y - canvas.height / 2;
+    if (Math.sqrt(dx * dx + dy * dy) > 10) player.targetAngle = Math.atan2(dy, dx);
+
+    player.update(dt); bots.forEach(bot => bot.update(dt));
+    for (let i = particles.length - 1; i >= 0; i--) {
+        let p = particles[i]; p.life -= dt * 60; p.pos = p.pos.add(p.vel.mult(dt * 60));
+        if (p.life <= 0) particles.splice(i, 1);
+    }
+
+    checkCollisions();
+    bots = bots.filter(b => !b.dead);
+
+    if (foods.length < CONFIG.foodCount) foods.push(new Food());
+    if (bots.length < CONFIG.botCount) bots.push(new Bot());
+    if (Math.random() < 0.02 && powerups.length < 20) powerups.push(new PowerUp());
+
+    document.getElementById('score').innerText = Math.floor(player.score);
+    updateLeaderboard(); updatePerformanceStats();
+}
+
+function checkCollisions() {
+    let allSnakes = [player, ...bots];
+    for (let s of allSnakes) {
+        if (s.dead) continue;
+        for (let i = foods.length - 1; i >= 0; i--) {
+            if (s.pos.dist(foods[i].pos) < s.width / 2 + foods[i].radius) { s.grow(foods[i].value); foods.splice(i, 1); }
+        }
+        for (let i = powerups.length - 1; i >= 0; i--) {
+            if (s.pos.dist(powerups[i].pos) < s.width / 2 + powerups[i].radius) { s.multiplier = powerups[i].multiplier; s.multiplierTimer = 10; powerups.splice(i, 1); }
+        }
+    }
+    for (let s1 of allSnakes) {
+        if (s1.dead) continue;
+        let nearby = spatialHash.retrieve({ x: s1.pos.x - 100, y: s1.pos.y - 100, w: 200, h: 200 });
+        for (let s2 of nearby) {
+            if (s1 === s2 || s2.dead) continue;
+            for (let i = 0; i < s2.path.length; i += Math.max(1, Math.floor(s2.width / 10))) {
+                if (s1.pos.dist(s2.path[i]) < s1.width * 0.35 + s2.width / 2) {
+                    s1.dead = true; spawnParticles(s1.pos, 50, s1.color); dropFood(s1); break;
+                }
+            }
+            if (s1.dead) break;
+        }
+    }
+    if (player.dead) gameOver();
+}
+
+function dropFood(snake) {
+    for (let i = 0; i < snake.path.length; i += Math.max(1, Math.floor(snake.width / 10))) {
+        foods.push(new Food(snake.path[i].x + (Math.random() - 0.5) * snake.width, snake.path[i].y + (Math.random() - 0.5) * snake.width, Math.max(1, Math.floor(snake.width / 5))));
+    }
+}
+
+function spawnParticles(pos, count, color) {
+    for (let i = 0; i < count; i++) particles.push({ pos: new Vector(pos.x, pos.y), vel: new Vector((Math.random() - 0.5) * 10, (Math.random() - 0.5) * 10), life: 50, color: color });
+}
+
+function gameOver() {
+    gameRunning = false;
+    document.getElementById('final-score').innerText = "Score: " + Math.floor(player.score);
+    document.getElementById('game-over-screen').classList.remove('hidden');
+    document.getElementById('hud').classList.add('hidden');
+}
+
+function isInViewport(pos, margin) {
+    let sx = pos.x - camera.x, sy = pos.y - camera.y;
+    return sx > -margin && sx < canvas.width + margin && sy > -margin && sy < canvas.height + margin;
+}
+
+function draw() {
+    ctx.fillStyle = '#0a0a0a'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    camera.x += (player.pos.x - canvas.width / 2 - camera.x) * 0.15;
+    camera.y += (player.pos.y - canvas.height / 2 - camera.y) * 0.15;
+    ctx.save(); ctx.translate(-camera.x, -camera.y);
+
+    // MESH BACKGROUND
+    let sx = Math.floor(camera.x / 200) * 200, sy = Math.floor(camera.y / 200) * 200;
+    let ex = sx + canvas.width + 400, ey = sy + canvas.height + 400;
+    ctx.strokeStyle = '#1a1a1a'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let x = sx; x < ex; x += 200) { ctx.moveTo(x, sy); ctx.lineTo(x, ey); }
+    for (let y = sy; y < ey; y += 200) { ctx.moveTo(sx, y); ctx.lineTo(ex, y); }
+    ctx.stroke();
+
+    // Map boundary
+    ctx.strokeStyle = '#ff0055'; ctx.lineWidth = 80; ctx.beginPath(); ctx.arc(0, 0, gameMapSize, 0, Math.PI * 2); ctx.stroke();
+
+    foods.forEach(f => f.draw(ctx)); powerups.forEach(p => p.draw(ctx));
+    particles.forEach(p => { ctx.fillStyle = p.color; ctx.globalAlpha = p.life / 50; ctx.beginPath(); ctx.arc(p.pos.x, p.pos.y, 5, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; });
+    bots.sort((a, b) => a.score - b.score).forEach(b => b.draw(ctx));
+    player.draw(ctx);
+    ctx.restore();
+    drawMinimap();
+}
+
+function drawMinimap() {
+    let mapSize = 150, x = canvas.width - mapSize - 20, y = canvas.height - mapSize - 20, scale = mapSize / (gameMapSize * 2);
+    ctx.save(); ctx.translate(x + mapSize / 2, y + mapSize / 2);
+    ctx.beginPath(); ctx.arc(0, 0, mapSize / 2, 0, Math.PI * 2); ctx.fillStyle = 'rgba(0, 0, 0, 0.5)'; ctx.fill();
+    ctx.strokeStyle = 'white'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = 'white'; ctx.beginPath(); ctx.arc(player.pos.x * scale, player.pos.y * scale, 3, 0, Math.PI * 2); ctx.fill();
+    bots.forEach(b => {
+        if (!b.dead) {
+            // Color code by size
+            if (b.score > 100000) ctx.fillStyle = '#ff0000'; // Huge (red)
+            else if (b.score > 10000) ctx.fillStyle = '#ff0055'; // Large (pink)
+            else ctx.fillStyle = '#aaaaaa'; // Normal (gray)
+            ctx.beginPath();
+            ctx.arc(b.pos.x * scale, b.pos.y * scale, b.score > 10000 ? 4 : 2, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    });
+    ctx.restore();
+}
+
+function updateLeaderboard() {
+    let list = document.getElementById('leaderboard-list'), all = [player, ...bots].sort((a, b) => b.score - a.score).slice(0, 10);
+    list.innerHTML = all.map((p, i) => {
+        let icon = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '';
+        return `<li style="${p === player ? 'color: #ff0055; font-weight:bold;' : ''}"><span>${i + 1}. ${p.name} ${icon}</span><span>${Math.floor(p.score)}</span></li>`;
+    }).join('');
+}
+
+function updatePerformanceStats() {
+    let now = performance.now();
+    fpsFrames.push(now); fpsFrames = fpsFrames.filter(t => now - t < 1000);
+    if (now - lastFpsUpdate > 1000) {
+        document.getElementById('fps').innerText = fpsFrames.length;
+        document.getElementById('ping').innerText = Math.floor(Math.random() * 5);
+        document.getElementById('input-delay').innerText = Math.floor(inputDelay);
+        lastFpsUpdate = now;
+    }
+}
+
+function getRandomName() {
+    const names = ["Snake", "Worm", "Python", "Viper", "Cobra", "Slayer", "Venom", "Fang", "Noodle", "Slider", "Rex", "Titan", "Goliath", "Hydra", "Basilisk", "Leviathan", "Behemoth"];
+    return names[Math.floor(Math.random() * names.length)] + Math.floor(Math.random() * 1000);
+}
+
+if (document.readyState === 'complete' || document.readyState === 'interactive') init();
+else { document.addEventListener('DOMContentLoaded', init); window.onload = init; }
